@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#061a31">
+  <title>深海吞噬者</title>
+  <style>
+    :root { --cyan:#71ecff; --ink:#f3fdff; --muted:#a7c8d5; --glass:#061a31b8; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; overscroll-behavior:none; background:#041426; color:var(--ink); font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+    body { touch-action:none; }
+    #app { position:fixed; inset:0; overflow:hidden; background:#061a31; }
+    canvas { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+    .hud { position:absolute; z-index:2; top:calc(env(safe-area-inset-top) + 14px); left:16px; right:16px; display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none; }
+    .brand { text-shadow:0 2px 12px #00101dcc; }
+    .brand h1 { margin:0; font-size:20px; line-height:1.1; letter-spacing:.06em; }
+    .brand p { margin:5px 0 0; font-size:11px; color:var(--muted); letter-spacing:.14em; }
+    .score { min-width:105px; padding:8px 13px; text-align:right; border:1px solid #9af4ff45; border-radius:12px; background:#03172bc7; box-shadow:0 8px 24px #00102055; }
+    .score small { display:block; color:var(--muted); font-size:10px; letter-spacing:.14em; }
+    .score strong { font-size:25px; line-height:1.1; color:var(--cyan); }
+    .hint { position:absolute; z-index:2; left:50%; top:calc(50% + 120px); transform:translateX(-50%); width:max-content; max-width:calc(100% - 40px); color:#d9faffaa; font-size:12px; text-align:center; pointer-events:none; transition:opacity .4s; }
+    .hint.off { opacity:0; }
+    .overlay { position:absolute; z-index:4; inset:0; display:grid; place-items:center; padding:24px; background:#02132399; backdrop-filter:blur(5px); }
+    .overlay.hide { display:none; }
+    .panel { width:min(400px,100%); padding:30px 24px 24px; text-align:center; border:1px solid #8eefff62; border-radius:22px; background:linear-gradient(150deg,#09243beF,#061524f2); box-shadow:0 24px 80px #000b, inset 0 0 35px #7defff0c; }
+    .panel .kicker { color:var(--cyan); font-size:11px; letter-spacing:.22em; }
+    .panel h2 { margin:11px 0 8px; font-size:30px; }
+    .panel p { margin:0 auto 22px; max-width:300px; color:var(--muted); line-height:1.7; font-size:14px; }
+    .result { display:none; margin:0 0 18px; padding:12px; border-top:1px solid #ffffff18; border-bottom:1px solid #ffffff18; }
+    .result.visible { display:block; }
+    .result b { display:block; color:var(--cyan); font-size:30px; }
+    button { min-width:180px; min-height:52px; padding:13px 24px; border:0; border-radius:12px; color:#04202a; background:var(--cyan); font:800 15px inherit; cursor:pointer; box-shadow:0 0 26px #71ecff4a; touch-action:manipulation; }
+    button:active { transform:scale(.97); }
+    .joystick { position:absolute; z-index:3; left:22px; bottom:calc(env(safe-area-inset-bottom) + 26px); width:112px; height:112px; border:1px solid #c9faff35; border-radius:50%; background:#05203866; box-shadow:inset 0 0 22px #73eaff12; pointer-events:none; opacity:0; transition:opacity .2s; }
+    .joystick.show { opacity:1; }
+    .joystick::before { content:""; position:absolute; left:50%; top:50%; width:38px; height:38px; transform:translate(-50%,-50%); border:1px solid #b4f8ff66; border-radius:50%; background:#70e9ff35; }
+    @media (min-width:700px) { .joystick { display:none; } .hint { top:auto; bottom:28px; } }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <canvas id="canvas"></canvas>
+    <div class="hud"><div class="brand"><h1>深海吞噬者</h1><p>ABYSSAL SURVIVAL</p></div><div class="score"><small>SCORE</small><strong id="score">0</strong></div></div>
+    <div class="hint" id="hint">按住屏幕并拖动 · 鱼头会朝移动方向转动</div>
+    <div class="joystick" id="joystick"></div>
+    <div class="overlay" id="overlay"><section class="panel"><div class="kicker">OCEAN EVOLUTION</div><h2 id="panelTitle">深海吞噬者</h2><p id="panelText">控制你的鱼在深海中游动，吞噬比你小的鱼，不断成长。遇到更大的鱼就快躲开！</p><div class="result" id="result">最终得分<b id="finalScore">0</b></div><button id="action">开始游戏</button></section></div>
+  </main>
+  <script>
+    /* ====== 可调参数：集中修改 ====== */
+    const CONFIG = { MIN_FISH: 12, MAX_FISH: 16, SMALL_FISH_CHANCE: .72, PLAYER_SPEED: 150, GROWTH: .52, AI_SPEED_MIN: 18, AI_SPEED_MAX: 48, PARTICLES: 14 };
+    const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+    const app = document.getElementById('app'), scoreEl = document.getElementById('score'), overlay = document.getElementById('overlay'), action = document.getElementById('action'), panelTitle = document.getElementById('panelTitle'), panelText = document.getElementById('panelText'), result = document.getElementById('result'), finalScore = document.getElementById('finalScore'), hint = document.getElementById('hint'), joystick = document.getElementById('joystick');
+    let W=0,H=0,dpr=1,playing=false,last=0,score=0,high=Number(localStorage.getItem('abyss-high')||0),fish=[],particles=[],bubbles=[],waves=[],pointer={active:false,id:null,x:0,y:0,originX:0,originY:0},keys={},audioCtx=null,ambience=null,musicTimer=null;
+    const player={x:0,y:0,r:23,angle:0,vx:0,vy:0};
+    const rand=(a,b)=>a+Math.random()*(b-a), clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+    function resize(){const r=app.getBoundingClientRect();W=r.width;H=r.height;dpr=Math.min(devicePixelRatio||1,2);canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);player.x=player.x?clamp(player.x,30,W-30):W/2;player.y=player.y?clamp(player.y,60,H-60):H*.55;bubbles=Array.from({length:Math.ceil(W*H/9500)},()=>({x:rand(0,W),y:rand(0,H),r:rand(1,4),v:rand(8,24),a:rand(.15,.45)}));}
+    addEventListener('resize',resize); resize();
+    function makeFish(){let small=Math.random()<CONFIG.SMALL_FISH_CHANCE,r=small?rand(8,20):rand(27,43), x=Math.random()<.5?-r*3:W+r*3, y=rand(90,H-70), dir=x<0?1:-1;return {x,y,r,dir,angle:dir>0?0:Math.PI,v:rand(CONFIG.AI_SPEED_MIN,CONFIG.AI_SPEED_MAX),phase:rand(0,7),color:small?['#ffd166','#8ce7ff','#a8e063','#f5b7ff'][Math.floor(rand(0,4))]:['#ff6b9c','#b879ff'][Math.floor(rand(0,2))],turn:rand(0,1)};}
+    function reset(){score=0;scoreEl.textContent='0';fish=[];particles=[];waves=[];player.r=23;player.x=W/2;player.y=H*.55;player.vx=player.vy=0;for(let i=0;i<CONFIG.MAX_FISH;i++)fish.push(makeFish());}
+    function start(){reset();startAudio();playing=true;overlay.classList.add('hide');hint.classList.remove('off');last=performance.now();requestAnimationFrame(loop);}
+    function endGame(){playing=false;stopAudio();finalScore.textContent=score;panelTitle.textContent='生存结束';panelText.textContent=score>=high?'新的最高分！深海霸主就是你。':'这次被大鱼盯上了，再试一次突破记录。';result.classList.add('visible');action.textContent='重新开始';overlay.classList.remove('hide');}
+    function playNote(freq,duration=.7,delay=0,volume=.035){if(!audioCtx)return;const now=audioCtx.currentTime+delay,o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='triangle';o.frequency.setValueAtTime(freq,now);g.gain.setValueAtTime(.001,now);g.gain.linearRampToValueAtTime(volume,now+.04);g.gain.exponentialRampToValueAtTime(.001,now+duration);o.connect(g).connect(audioCtx.destination);o.start(now);o.stop(now+duration+.05);}
+    function startAudio(){if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();if(musicTimer)return;const melody=[220,277.18,329.63,277.18,246.94,329.63,369.99,329.63];let step=0;const playBar=()=>{const root=melody[step%melody.length];playNote(root,1.35,0,.045);playNote(root*1.5,1.1,.18,.018);playNote(root*2,0.6,.46,.014);step++;};playBar();musicTimer=setInterval(playBar,1250);}
+    function stopAudio(){if(musicTimer){clearInterval(musicTimer);musicTimer=null;}}
+    function eatSound(){if(!audioCtx)return;const now=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='sine';o.frequency.setValueAtTime(330,now);o.frequency.exponentialRampToValueAtTime(720,now+.12);g.gain.setValueAtTime(.12,now);g.gain.exponentialRampToValueAtTime(.001,now+.16);o.connect(g).connect(audioCtx.destination);o.start(now);o.stop(now+.17);}
+    action.addEventListener('click',start);
+    function setPointer(e){const r=canvas.getBoundingClientRect();pointer.x=e.clientX-r.left;pointer.y=e.clientY-r.top;const dx=pointer.x-pointer.originX,dy=pointer.y-pointer.originY,len=Math.hypot(dx,dy)||1;player.vx=dx/len;player.vy=dy/len;if(Math.hypot(dx,dy)>12)hint.classList.add('off');}
+    canvas.addEventListener('pointerdown',e=>{e.preventDefault();pointer.active=true;pointer.id=e.pointerId;pointer.originX=e.clientX;pointer.originY=e.clientY;setPointer(e);if(e.pointerType==='touch')joystick.classList.add('show');canvas.setPointerCapture(e.pointerId);});
+    canvas.addEventListener('pointermove',e=>{if(pointer.active&&e.pointerId===pointer.id){e.preventDefault();setPointer(e);}});
+    canvas.addEventListener('pointerup',e=>{if(e.pointerId===pointer.id){pointer.active=false;player.vx=player.vy=0;joystick.classList.remove('show');}});
+    canvas.addEventListener('pointercancel',()=>{pointer.active=false;player.vx=player.vy=0;joystick.classList.remove('show');});
+    addEventListener('keydown',e=>{keys[e.key]=true;keys[e.key.toLowerCase()]=true;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();if(e.key===' '&&!playing)start();});addEventListener('keyup',e=>{keys[e.key]=false;keys[e.key.toLowerCase()]=false;});
+    function update(dt){let kx=(keys.ArrowRight||keys.d?1:0)-(keys.ArrowLeft||keys.a?1:0),ky=(keys.ArrowDown||keys.s?1:0)-(keys.ArrowUp||keys.w?1:0);if(kx||ky){const l=Math.hypot(kx,ky);player.vx=kx/l;player.vy=ky/l;hint.classList.add('off');}const moving=player.vx||player.vy;const speed=CONFIG.PLAYER_SPEED*(player.r/23<1.8?1:Math.max(.68,1.55-player.r/23));player.x=clamp(player.x+player.vx*speed*dt,player.r,W-player.r);player.y=clamp(player.y+player.vy*speed*dt,70,H-player.r);if(moving)player.angle=Math.atan2(player.vy,player.vx);
+      fish.forEach(f=>{let ax=Math.sin(performance.now()/1200+f.phase)*.18, ay=Math.cos(performance.now()/1000+f.phase)*.18;const dx=player.x-f.x,dy=player.y-f.y,d=Math.hypot(dx,dy)||1;if(f.r<player.r*.86&&d<160){ax-=dx/d*.55;ay-=dy/d*.55;}else if(f.r>player.r*1.3&&d<220){ax+=dx/d*.28;ay+=dy/d*.28;}f.v=clamp(f.v+(Math.random()-.5)*.5,CONFIG.AI_SPEED_MIN,CONFIG.AI_SPEED_MAX+score*.04);let vx=f.dir*f.v+ax*9,vy=ay*9+Math.sin(performance.now()/800+f.phase)*4;f.x+=vx*dt;f.y+=vy*dt;f.y=clamp(f.y,65,H-30);if(f.x<-f.r*3){f.x=W+f.r*3;f.dir=-1;}if(f.x>W+f.r*3){f.x=-f.r*3;f.dir=1;}f.angle+=(Math.atan2(vy,vx)-f.angle+Math.PI*3)%(Math.PI*2)-Math.PI;f.angle*=.9;});
+      for(let i=fish.length-1;i>=0;i--){let f=fish[i];if(Math.hypot(f.x-player.x,f.y-player.y)<f.r+player.r*.72){if(f.r<player.r*.94){score+=Math.ceil(f.r*(1+Math.min(3,player.r/28)));scoreEl.textContent=score;player.r=Math.min(72,player.r+CONFIG.GROWTH);splash(f.x,f.y,f.color);eatSound();fish.splice(i,1);if(score>high){high=score;localStorage.setItem('abyss-high',high);}}else return endGame();}}while(fish.length<CONFIG.MIN_FISH)fish.push(makeFish());particles.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=65*dt;p.life-=dt;});particles=particles.filter(p=>p.life>0);bubbles.forEach(b=>{b.y-=b.v*dt;if(b.y<-b.r)b.y=H+b.r;});waves.forEach(w=>{w.r+=35*dt;w.a-=dt*.65;});waves=waves.filter(w=>w.a>0);}
+    function splash(x,y,color){waves.push({x,y,r:5,a:1});for(let i=0;i<CONFIG.PARTICLES;i++){const a=rand(0,Math.PI*2),v=rand(35,110);particles.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:rand(.4,.8),color});}}
+    function drawFish(f){ctx.save();ctx.translate(f.x,f.y);ctx.rotate(f.angle);const s=f.r/24;ctx.scale(s,s);ctx.globalAlpha=.96;ctx.shadowColor=f.color;ctx.shadowBlur=10;ctx.fillStyle=f.color;ctx.beginPath();ctx.ellipse(0,0,25,15,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.moveTo(-18,0);ctx.lineTo(-38,-18);ctx.lineTo(-34,0);ctx.lineTo(-38,18);ctx.closePath();ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(13,-5,4,0,7);ctx.fill();ctx.fillStyle='#102a3c';ctx.beginPath();ctx.arc(14,-5,2,0,7);ctx.fill();ctx.strokeStyle='#ffffff55';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(4,4,8,0,Math.PI);ctx.stroke();ctx.restore();}
+    function draw(){let g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#092a48');g.addColorStop(.5,'#075275');g.addColorStop(1,'#021e3b');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);ctx.globalAlpha=.18;for(let i=0;i<7;i++){ctx.fillStyle='#a5f6ff';ctx.beginPath();ctx.ellipse(W*(i/6-.1),H*.1,35,H*.8,-.25,0,7);ctx.fill();}ctx.globalAlpha=1;bubbles.forEach(b=>{ctx.strokeStyle=`rgba(190,247,255,${b.a})`;ctx.lineWidth=1;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);ctx.stroke();});waves.forEach(w=>{ctx.globalAlpha=w.a;ctx.strokeStyle='#bfffff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(w.x,w.y,w.r,0,7);ctx.stroke();});ctx.globalAlpha=1;fish.forEach(drawFish);drawFish({x:player.x,y:player.y,r:player.r,angle:player.angle,color:'#65e9ff'});particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,7);ctx.fill();});ctx.globalAlpha=1;}
+    function loop(t){if(!playing)return;const dt=Math.min(.035,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+  </script>
+</body>
+</html>
